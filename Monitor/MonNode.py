@@ -114,6 +114,7 @@ def getNodeOrder(arg):
     numRow = arg.n[0]
     if (lastPosGet == 0):
         eventUpdate.clear()
+        currentData = getData()
         lockData.acquire()
         dataToProcess = copy.deepcopy(currentData)
         lockData.release()
@@ -178,7 +179,6 @@ def workWithServer():
         dataSend = createMessage(dataSend, {'-name': myName})
         dataSend = createMessage(dataSend, {'-num_node':numberNode})
         sock.sendall(bytes(dataSend.encode('utf-8')))
-        currentData = getData()
         #listen command from server
         while 1:
             try:
@@ -198,7 +198,7 @@ def workWithServer():
                 getNodeOrder(arg)
             elif type == MyEnum.MonNode.SERVER_GET_DATA.value:
                 getNodeValue(arg)
-            elif type == MyEnum.MonNode.SERVER_SET_FINISH_SESSION:
+            elif type == MyEnum.MonNode.SERVER_SET_FINISH_SESSION.value:
                 setFinishSession()
     except socket.error:
         pass
@@ -236,12 +236,12 @@ try:
     thMon = threading.Thread(target=monData, args=())
     thWork = threading.Thread(target=workWithServer, args=())
 
-    thMon.start()
+    # thMon.start()
     thWork.start()
 
     #wait for all thread running
     thWork.join()
-    thMon.join()
+    # thMon.join()
 
 except socket.error as e:
     print(e)

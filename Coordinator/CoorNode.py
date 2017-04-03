@@ -65,6 +65,7 @@ DELTA_BAND = int(band / 10)
 DELTA_EPS = 1
 FILE_MON_NET = 'NetWorkLoad_'+ ext+'.dat'
 FILE_MON_TOP = 'Top_' + ext + '.dat'
+TIME_WAIT = 2.0
 
 ORDER_NODE = 0
 ORDER_VALUE = 1
@@ -120,8 +121,6 @@ def monNetwork():
         if countTime > NUM_MONITOR:
             return
         saveNetworkLoad(nOut + nIn)
-        if DEBUG:
-            print('countTime; %d' %(countTime) )
 
 ################################################################################
 def createMessage(strRoot = '', arg = {}):
@@ -133,7 +132,7 @@ def createMessage(strRoot = '', arg = {}):
 
 #read file config
 def readConfig(fName : str):
-    global DEBUG, MODE_EPS, k, IP_SERVER, PORT_NODE, FILE_MON_TOP, ROW
+    global DEBUG, k, IP_SERVER, PORT_NODE, FILE_MON_TOP, ROW
     global PORT_USER, NUMBER_NODE, FILE_MON_NET, NUM_MONITOR, TIME_CAL_NETWORK
 
     arg = ParseCor.readConfig(fName)
@@ -141,12 +140,9 @@ def readConfig(fName : str):
         return
 
     DEBUG = arg.DEBUG
-    MODE_EPS = arg.MODE_EPS
     ext = arg.ext
     k = arg.k
     IP_SERVER = arg.IP_SERVER
-    PORT_NODE = arg.PORT_NODE
-    PORT_USER = arg.PORT_USER
     NUMBER_NODE = arg.NUMBER_NODE
     ROW = arg.ROW
     FILE_MON_NET = 'NetWorkLoad_'+ ext+'.dat'
@@ -161,7 +157,7 @@ def init():
     global parser, k, numNode, lBound
 
     try:
-        readConfig('corConfig.cfg')
+        readConfig('config/corConfig.cfg')
     except Exception:
         pass
 
@@ -226,8 +222,52 @@ def getNodeValue(nodeNeed):
             arg = parser.parse_args(dataRcv.lstrip().split(' '))
             dataAtt[i] = copy.deepcopy(arg)
 
+def printTop():
+    global userSock, topK, nameTop, DEBUG
+
+    data = json.dumps([nameTop, topK])
+
+    if (DEBUG):
+        print('____________________TOP__________________')
+        print(data)
+        print('____________________END__________________')
+    try:
+        userSock.sendall(data.encode())
+    except Exception:
+        return
+
+def moveFromTo(i,j, maxlen):
+    global topK, nameTop
+    if j > maxlen:
+        return
+
+    topK[j] = topK[i]
+    nameTop[j] = nameTop[i]
+
+def addToTop(value=[0,0]):
+    global topK, nameTop, k
+    c = k-1
+    while (c >= 0 and topK[c] < value[ORDER_VALUE]):
+        moveFromTo(c, c+1, k-1)
+        c -= 1
+
+    topK[c+1] = value[ORDER_VALUE]
+    nameTop[c+1] = value[ORDER_NODE]
+
+    pass
+
+def sendFinish():
+    dataSend = ''
+    dataSend = createMessage(dataSend, {'-type':MyEnum.MonNode.SERVER_SET_FINISH_SESSION.value})
+    dataSend = bytes(dataSend.encode())
+    for s in lstSock:
+        s.sendall(dataSend)
+    pass
+
 def beginProcess():
-    global nodeRecv
+    global nodeRecv, topK, k
+    startTime = time.time()
+    myCount = 0
     while(True):
         getNodeOrder()
 
@@ -242,10 +282,11 @@ def beginProcess():
                 if nodeRecv[j] == False:
                     nodeRecv[j] = True
                     nodeNeed.append(j)
+                    myCount += 1
 
-        nodeNeed = json.dumps(nodeNeed).replace(' ','')
+        nodeNeed = json.dumps(nodeNeed).replace(' ', '')
 
-        if (topK[k-1] > currentBound):
+        if (topK[k-1] >= currentBound):
             pass
         else:
             getNodeValue(nodeNeed)
@@ -253,12 +294,33 @@ def beginProcess():
             for i in range(countAtt):
                 data[i] = json.loads(dataAtt[i].data[0])
             value = []
-            for i in range(len(data)):
-                value.append(data[0][i][ORDER_NODE], 0)
+            for i in range(len(data[0])):
+                value.append([data[0][i][ORDER_NODE], 0])
+
             for i in range(countAtt):
-                for j in range(len(data)):
+                for j in range(len(data[0])):
                     value[j][ORDER_VALUE] += data[i][j][ORDER_VALUE]
 
+            for i in range(len(data[0])):
+                if (value[i][ORDER_VALUE] > topK[k-1]):
+                    addToTop(value[i])
+
+            if (topK[k-1] < currentBound):
+                continue
+
+        sendFinish()
+        printTop()
+        print(myCount)
+        curTime = time.time()
+        if (curTime - startTime < TIME_WAIT):
+            time.sleep(TIME_WAIT - curTime + startTime)
+        for i in range(k):
+            topK[i] = 0
+            nameTop[i] = -1
+        for i in range(numNode):
+            nodeRecv[i] = False
+            myCount = 0
+        startTime = time.time()
 
 ################################################################################
 def addNewNode(s : socket.socket, orderNode):
